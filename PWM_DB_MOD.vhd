@@ -4,46 +4,46 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity PWM_DB_MOD is
 generic (
-	PWM_DB      :  INTEGER RANGE 0 TO 4095
+	PWM_DB_COUNT    :  INTEGER RANGE 0 TO 4095       -- Deadband (us)  <= PWM_DB * 2/(Clock Freq in MHz)
 );
 port ( 
-	CLK         :  IN  STD_LOGIC;
-	PWM_FREQ 	:  IN  INTEGER RANGE 0 TO 4095;
-	PWM_DUTY    :  IN  INTEGER RANGE 0 TO 4095;
-	PWM_EN      :  IN  STD_LOGIC;
-	PWM_A 		:  OUT STD_LOGIC;
-	PWM_B		   :  OUT STD_LOGIC
+	CLK         	:  IN  STD_LOGIC;		 -- Fclk <- Clock Frequency
+	PWM_FREQ_COUNT  :  IN  INTEGER RANGE 0 TO 4095;  -- Switching Freq = Fclk (Hz)/(PWM_FREQ)
+	PWM_DUTY_COUNT  :  IN  INTEGER RANGE 0 TO 4095;  -- [0, PWM_FREQ_COUNT] --> [0, 1]
+	PWM_EN      	:  IN  STD_LOGIC;
+	PWM_LS 	    	:  OUT STD_LOGIC;		 -- PWM Low  Side Output
+	PWM_HS      	:  OUT STD_LOGIC		 -- PWM High Side Output
 );
 end entity PWM_DB_MOD;
 
 
 architecture PWM_DB_MOD_ARC of PWM_DB_MOD is
 
-signal PWM_A_T		  	 :  STD_LOGIC := '0';
-signal PWM_B_T        :  STD_LOGIC := '0';
-signal PWM_COUNT      :  INTEGER RANGE 0 to 4095 := 0;
-signal PWM_DUTY_T     :  INTEGER RANGE 0 to 4095 := 0;
-signal PWM_COUNTER_T  :  INTEGER RANGE 0 TO 4095 := 4095;
+signal PWM_LS_T	         :  STD_LOGIC := '0';
+signal PWM_HS_T          :  STD_LOGIC := '0';
+signal PWM_TICK_COUNT    :  INTEGER RANGE 0 to 4095 := 0;
+signal PWM_DUTY_COUNT_T  :  INTEGER RANGE 0 to 4095 := 0;
+signal PWM_FREQ_COUNT_T  :  INTEGER RANGE 0 TO 4095 := 4095;
 
 begin
  
  
 ---------------------------------------------------------
---- 			      PWM ENABLE CONTROL 				      ---
+--- 	   	   PWM ENABLE CONTROL 		      ---
 ---------------------------------------------------------
 					
 with (PWM_EN) select
-	PWM_A   <=  PWM_A_T when '1',         -- NO FORCE  --
-					'0'     when others;      -- FORCE LOW --
+	PWM_LS   <=  PWM_LS_T when '1',        -- NO FORCE  --
+		     '0'      when others;     -- FORCE LOW --
 
 					
 with (PWM_EN) select
-	PWM_B   <=  PWM_B_T when '1',         -- NO FORCE   --
-					'0'     when others;      -- FORCE LOW --
+	PWM_HS   <=  PWM_HS_T when '1',        -- NO FORCE  --
+		     '0'      when others;     -- FORCE LOW --
 					
 
 ---------------------------------------------------------		
---- 			     PWM INCREMENT COUNTER 				   ---
+--- 	         PWM INCREMENT COUNTER 	              ---
 ---------------------------------------------------------
 
 PWM_COUNTER_INC : process(CLK)
@@ -51,26 +51,31 @@ begin
 
 	if(rising_edge(CLK)) 
 	then
-		if(PWM_COUNT >= PWM_COUNTER_T) 
+		if(PWM_TICK_COUNT >= PWM_COUNTER_T) 
 		then
-
 			--- Update PWM register values ---
 
-			PWM_COUNTER_T <=  PWM_FREQ;
-			PWM_DUTY_T    <=  PWM_DUTY;
-			PWM_COUNT     <=  0;
+			PWM_FREQ_COUNT_T <=  PWM_FREQ_COUNT;
 			
-		else
-			PWM_COUNT 	  <=  PWM_COUNT + 1;		
-		end if;
+			if(PWM_DUTY_COUNT > PWM_FREQ_COUNT) 
+			then
+				PWM_DUTY_COUNT_T  = 0;
+			else
+				PWM_DUTY_COUNT_T  <=  PWM_DUTY_COUNT;
+			endif;
+		
+			PWM_TICK_COUNT  <=  0;
 
+		else
+			PWM_TICK_COUNT  <=  PWM_TICK_COUNT + 1;		
+		end if;
 	end if;
 	
 end process PWM_COUNTER_INC;
 
 
 ---------------------------------------------------------
---- 			     PWM OUT with DEADBAND 			      ---
+--- 	         PWM OUT with DEADBAND 		      ---
 ---------------------------------------------------------
 
 PWM_OUTPUT_DB : process(CLK, PWM_COUNT)
@@ -78,26 +83,28 @@ begin
 
 	if(rising_edge(CLK)) 
 	then
-		if(PWM_COUNT <= PWM_DB) 
+		if(PWM_TICK_COUNT <= PWM_DB_COUNT) 
 		then
-			PWM_A_T <= '0';
-		elsif(PWM_COUNT >= PWM_DUTY_T - PWM_DB) 
+			PWM_LS_T <= '0';
+		
+		elsif(PWM_TICK_COUNT >= PWM_DUTY_COUNT_T - PWM_DB_COUNT) 
 		then
-			PWM_A_T <= '0';
+			PWM_LS_T <= '0';
 		else
-			PWM_A_T <= '1';
+			PWM_LS_T <= '1';
 		end if;
 		
-		if(PWM_COUNT <= PWM_DUTY_T + PWM_DB) 
+		if(PWM_TICK_COUNT <= PWM_DUTY_COUNT_T + PWM_DB_COUNT) 
 		then
-			PWM_B_T <= '0';
-		elsif(PWM_COUNT >= PWM_COUNTER_T - PWM_DB) 
+			PWM_HS_T <= '0';
+			
+		elsif(PWM_TICK_COUNT >= PWM_FREQ_COUNT_T - PWM_DB_COUNT) 
 		then
-			PWM_B_T <= '0';
+			PWM_HS_T <= '0';
 		else
-			PWM_B_T <= '1';
+			PWM_HS_T <= '1';
 		end if;
-
+			
 	end if;
 		
 end process PWM_OUTPUT_DB;
